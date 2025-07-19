@@ -12,7 +12,7 @@ def authenticate_and_get_user_details(request):
         request_state = clerk_sdk.authenticate_request(
             request,
             AuthenticateRequestOptions(
-                authorized_parties=["http://localhost:5000"],
+                authorized_parties=["http://localhost:8000", "http://localhost:8080"],
                 jwt_key=os.getenv("JWT_KEY"),
             )
         )
@@ -20,6 +20,7 @@ def authenticate_and_get_user_details(request):
             raise HTTPException(status=401, detail="Invalid token")
         
         user_id = request_state.payload.get("sub")
+        print(f"Authenticated user ID: {user_id}")
         return {"user_id": user_id}
 
     except Exception as e:
