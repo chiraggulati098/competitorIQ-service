@@ -10,6 +10,8 @@ import logging
 import json
 import re
 from html_processing_library import diff_html  
+from mail_service import send_email
+from utils.clerk_auth import get_user_mails
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
@@ -92,49 +94,101 @@ Diffs:
         summary_json = {}
     return summary_json
 
+def generate_user_email_content(user_id, user_competitors):
+    summary_blocks = []
+    total_pages = 0
+    competitor_names = []
+    for competitor in user_competitors:
+        name = competitor.get('name')
+        competitor_names.append(name)
+        snaps = competitor.get('snapshots', [])
+        if len(snaps) < 2:
+            continue
+        snap1, snap2 = snaps[-2], snaps[-1]
+        diff_by_url = diff_snapshots(snap1, snap2)
+        summary_json = summarize_with_gemini(diff_by_url)
+        summary_doc = {
+            'date': snap2['date'],
+            'summary': summary_json,
+            'diff': diff_by_url
+        }
+        # Store summary, keep only 10 most recent
+        competitor['summaries'] = competitor.get('summaries', [])[-9:] + [summary_doc]
+        summary_blocks.append({
+            'competitor': name,
+            'summary': summary_json,
+            'diff': diff_by_url
+        })
+        total_pages += len(snap2.get('pages', []))
+    # Compose prompt for Gemini to generate subject and body
+    prompt = f"""
+You are an expert product analyst and email copywriter for CompetitorIQ. Write a concise, actionable email update for the user summarizing all tracked competitors' changes.
+
+Details to include:
+- Number of competitors tracked: {len(user_competitors)}
+- Names of competitors: {', '.join(competitor_names)}
+- Total number of pages tracked: {total_pages}
+- For each competitor, summarize the meaningful changes (see below)
+
+Summaries:
+{json.dumps(summary_blocks, indent=2)}
+
+Return a JSON object with two fields: 'subject' (string) and 'body' (string, can be HTML or plain text). Do not include any explanations or headers.
+"""
+    response = generate_response(prompt)
+    try:
+        match = re.search(r'\{[\s\S]*\}', response)
+        if match:
+            mail_json = json.loads(match.group(0))
+        else:
+            mail_json = {"subject": "CompetitorIQ Update", "body": "No changes detected."}
+    except Exception:
+        mail_json = {"subject": "CompetitorIQ Update", "body": "No changes detected."}
+    return mail_json
+
 def main():
     client = MongoClient(MONGO_URI)
     db = client[DB_NAME]
     collection = db[COLLECTION_NAME]
     competitors = list(collection.find({}))
     logging.info(f"Found {len(competitors)} competitors.")
+    # Group competitors by user
+    user_map = {}
     for competitor in competitors:
         user_id = competitor.get('userId')
-        name = competitor.get('name')
-        logging.info(f"Processing competitor '{name}' for user {user_id}")
-        urls = get_tracked_urls(competitor)
-        # Take new snapshot
-        pages = asyncio.run(crawl_urls(urls))
-        snapshot = {
-            'date': datetime.utcnow().isoformat() + 'Z',
-            'pages': pages
-        }
-        # Add snapshot, keep only 2 most recent
-        collection.update_one(
-            {'_id': competitor['_id']},
-            {'$push': {'snapshots': {'$each': [snapshot], '$slice': -2}}}
-        )
-        # Get the two most recent snapshots
-        updated = collection.find_one({'_id': competitor['_id']})
-        snaps = updated.get('snapshots', [])
-        if len(snaps) < 2:
-            logging.info("Not enough snapshots to diff yet.")
+        if not user_id:
             continue
-        snap1, snap2 = snaps[-2], snaps[-1]
-        diff_by_url = diff_snapshots(snap1, snap2)
-        summary_json = summarize_with_gemini(diff_by_url)
-        summary_doc = {
-            'date': snapshot['date'],
-            'summary': summary_json,
-            'diff': diff_by_url
-        }
-        # Store summary, keep only 10 most recent
-        collection.update_one(
-            {'_id': competitor['_id']},
-            {'$push': {'summaries': {'$each': [summary_doc], '$slice': -10}}}
-        )
-        logging.info(f"Summary for '{name}':\n{json.dumps(summary_json, indent=2)}\n")
-        # TODO: Email the user the summary
+        user_map.setdefault(user_id, []).append(competitor)
+    # Get all user emails once
+    user_mails = get_user_mails()
+    for user_id, user_competitors in user_map.items():
+        # For each competitor, update snapshots and summaries
+        for competitor in user_competitors:
+            urls = get_tracked_urls(competitor)
+            # Take new snapshot
+            pages = asyncio.run(crawl_urls(urls))
+            snapshot = {
+                'date': datetime.utcnow().isoformat() + 'Z',
+                'pages': pages
+            }
+            # Add snapshot, keep only 2 most recent
+            collection.update_one(
+                {'_id': competitor['_id']},
+                {'$push': {'snapshots': {'$each': [snapshot], '$slice': -2}}}
+            )
+            # Refresh competitor with latest snapshots
+            updated = collection.find_one({'_id': competitor['_id']})
+            competitor['snapshots'] = updated.get('snapshots', [])
+            competitor['summaries'] = updated.get('summaries', [])
+        # Generate email content for this user
+        mail_json = generate_user_email_content(user_id, user_competitors)
+        # Get user email from user_mails dict
+        user_email = user_mails.get(user_id)
+        if user_email:
+            result = send_email(user_email, mail_json['subject'], mail_json['body'])
+            logging.info(f"Sent email to {user_email}: {result}")
+        else:
+            logging.warning(f"Could not find email for user {user_id}")
     client.close()
 
 if __name__ == "__main__":

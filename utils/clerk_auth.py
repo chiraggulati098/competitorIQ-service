@@ -4,8 +4,9 @@ import dotenv
 import os
 
 dotenv.load_dotenv()
+CLERK_SECRET_KEY = os.getenv("CLERK_SECRET_KEY")
 
-clerk_sdk = Clerk(bearer_auth=os.getenv("CLERK_SECRET_KEY"))
+clerk_sdk = Clerk(bearer_auth=CLERK_SECRET_KEY)
 
 def authenticate_and_get_user_details(request):
     try:
@@ -24,3 +25,12 @@ def authenticate_and_get_user_details(request):
 
     except Exception as e:
         raise HTTPException(status=500, detail="Invalid credentials")
+
+def get_user_mails():
+    user_details = clerk_sdk.users.list()
+
+    return {
+        user.id: user.email_addresses[0].email_address
+        for user in user_details
+        if user.email_addresses  
+    }
