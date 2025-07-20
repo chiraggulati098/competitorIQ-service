@@ -3,8 +3,17 @@ import asyncio
 import re
 from crawl4ai import AsyncWebCrawler
 from AiLib import generate_response
+from datetime import datetime
+from pymongo import MongoClient
 
 competitor_bp = Blueprint('competitor', __name__)
+
+# MongoDB connection helper
+MONGO_URI = "mongodb://localhost:27017/"
+DB_NAME = "competitorIQ"
+COLLECTION_NAME = "competitors"
+def get_mongo_client():
+    return MongoClient(MONGO_URI)
 
 # Async helper for crawling and field extraction (homepage only)
 async def crawl_and_extract_fields(homepage):
@@ -43,3 +52,38 @@ def scan_competitor():
     except Exception as e:
         return jsonify({'error': f'Error during crawling/extraction: {str(e)}'}), 500
     return jsonify(fields), 200 
+
+@competitor_bp.route('/api/competitors', methods=['POST'])
+def save_competitor():
+    data = request.get_json()
+    user_id = data.get('userId')
+    name = data.get('name')
+    homepage = data.get('homepage')
+    fields = data.get('fields')
+    snapshot = data.get('snapshot') 
+    if not user_id or not name or not homepage or not fields or not snapshot:
+        return jsonify({'error': 'Missing required fields'}), 400
+    doc = {
+        'userId': user_id,
+        'name': name,
+        'homepage': homepage,
+        'fields': fields,
+        'snapshots': [snapshot]
+    }
+    try:
+        client = get_mongo_client()
+        db = client[DB_NAME]
+        collection = db[COLLECTION_NAME]
+        # Check for duplicate
+        existing = collection.find_one({
+            'userId': user_id,
+            'homepage': homepage
+        })
+        if existing:
+            client.close()
+            return jsonify({'error': 'Competitor already exists for this user.'}), 409
+        result = collection.insert_one(doc)
+        client.close()
+        return jsonify({'success': True, 'id': str(result.inserted_id)}), 201
+    except Exception as e:
+        return jsonify({'error': f'Error saving competitor: {str(e)}'}), 500 
