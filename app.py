@@ -1,9 +1,13 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from utils.clerk_auth import authenticate_and_get_user_details
+from routes.competitor import competitor_bp
 
 app = Flask(__name__)
 CORS(app, origins=["http://localhost:8080"], supports_credentials=True)
+
+# Register competitor routes
+app.register_blueprint(competitor_bp)
 
 @app.route('/login', methods=['POST', 'OPTIONS'])
 def login():
