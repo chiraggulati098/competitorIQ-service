@@ -2,11 +2,13 @@ import asyncio
 from datetime import datetime
 from pymongo import MongoClient
 from bson import ObjectId
-from crawl4ai import AsyncWebCrawler
+import requests
+from bs4 import BeautifulSoup
 from AiLib import generate_response
 import difflib
 import logging
 import json
+import re
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
@@ -14,7 +16,6 @@ MONGO_URI = "mongodb://localhost:27017/"
 DB_NAME = "competitorIQ"
 COLLECTION_NAME = "competitors"
 
-# Helper to get tracked URLs
 def get_tracked_urls(competitor):
     urls = [competitor.get('homepage')]
     fields = competitor.get('fields', {})
@@ -26,7 +27,6 @@ def get_tracked_urls(competitor):
     urls.extend([u for u in custom if u])
     return list(set(urls))
 
-# Diff two snapshots (returns dict of url -> diff text)
 def diff_snapshots(snap1, snap2):
     diff_by_url = {}
     pages1 = {p['url']: p['content'] for p in snap1.get('pages', [])}
@@ -38,19 +38,26 @@ def diff_snapshots(snap1, snap2):
         diff = '\n'.join(difflib.unified_diff(
             content1.splitlines(), content2.splitlines(), lineterm='', fromfile='before', tofile='after'))
         diff_by_url[url] = diff
+    print(diff_by_url)
     return diff_by_url
+
+# Fetch HTML using requests + BeautifulSoup
+async def fetch_html(url):
+    try:
+        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        html = soup.prettify()
+        return html
+    except Exception as e:
+        logging.warning(f"Failed to crawl {url}: {e}")
+        return ""
 
 async def crawl_urls(urls):
     pages = []
-    async with AsyncWebCrawler() as crawler:
-        for url in urls:
-            try:
-                result = await crawler.arun(url)
-                content = getattr(result, 'markdown', '')
-                pages.append({'url': url, 'content': content})
-            except Exception as e:
-                logging.warning(f"Failed to crawl {url}: {e}")
-                pages.append({'url': url, 'content': ''})
+    for url in urls:
+        html = await fetch_html(url)
+        pages.append({'url': url, 'content': html})
     return pages
 
 def summarize_with_gemini(diff_by_url):
@@ -71,9 +78,7 @@ Diffs:
     for url, diff in diff_by_url.items():
         prompt += f"\nURL: {url}\nDiff:\n{diff}\n"
     prompt += "\nJSON:"
-    print(prompt)
     response = generate_response(prompt)
-    # Try to extract the first {...} JSON block from the response
     try:
         match = re.search(r'\{[\s\S]*\}', response)
         if match:
@@ -130,5 +135,4 @@ def main():
     client.close()
 
 if __name__ == "__main__":
-    import re
     main() 
