@@ -2,13 +2,14 @@ import asyncio
 from datetime import datetime
 from pymongo import MongoClient
 from bson import ObjectId
-import requests
+from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from AiLib import generate_response
 import difflib
 import logging
 import json
 import re
+from html_processing_library import diff_html  
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
@@ -35,20 +36,21 @@ def diff_snapshots(snap1, snap2):
     for url in all_urls:
         content1 = pages1.get(url, '')
         content2 = pages2.get(url, '')
-        diff = '\n'.join(difflib.unified_diff(
-            content1.splitlines(), content2.splitlines(), lineterm='', fromfile='before', tofile='after'))
-        diff_by_url[url] = diff
+        diff = diff_html(content1, content2)  
+        diff_by_url[url] = '\n'.join(diff)
     print(diff_by_url)
     return diff_by_url
 
-# Fetch HTML using requests + BeautifulSoup
+# Fetch HTML using Playwright
 async def fetch_html(url):
     try:
-        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
-        html = soup.prettify()
-        return html
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            await page.goto(url, timeout=20000)
+            html = await page.content()
+            await browser.close()
+            return html
     except Exception as e:
         logging.warning(f"Failed to crawl {url}: {e}")
         return ""
@@ -62,16 +64,17 @@ async def crawl_urls(urls):
 
 def summarize_with_gemini(diff_by_url):
     prompt = """
-You are an expert AI product analyst for CompetitorIQ. Summarize the following changes detected on a competitor's tracked pages. Only mention meaningful changes (such as new features, pricing changes, new blog posts, product updates, etc). Ignore trivial or cosmetic changes (such as minor text tweaks, formatting, or style changes).
-
-Return your answer as a JSON object. Each key should be the field name (e.g., 'pricing', 'blog', 'releaseNotes', 'playstore', 'appstore', 'linkedin', 'twitter', or the URL for custom fields), and each value should be a clear, confident, and actionable summary of the meaningful change for that field. If a change is detected but the exact content is unclear, confidently state what was detected (e.g., "A new blog post was published". Do not apologize or hedge. If there are no meaningful changes, return an empty JSON object: {}.
-
-Example:
-{
-  "pricing": "The pricing was updated to reflect new plans.",
-  "blog": "A new blog post was published on the company blog.",
-  "customfield1": "The UI was refreshed with a modern look."
-}
+You are an expert AI product analyst for CompetitorIQ, a tool that tracks changes in competitors' products.
+Analyze the content from {url} to identify *meaningful* changes related to:
+- New features or product updates
+- Pricing changes
+- New blog posts
+- Social announcements
+Ignore trivial or cosmetic changes (e.g., minor text tweaks, formatting, or style changes).
+Return a JSON object where each key is the relevant field (e.g., 'pricing', 'blog', 'releaseNotes', 'playstore', 'appstore', 'linkedin', 'twitter', or the URL for custom fields),
+and each value is a clear, confident, actionable summary of the meaningful change in 1-2 sentences.
+If no meaningful changes are detected, return an empty JSON object: {{}}.
+Do not include any explanations or headers in the JSON output.
 
 Diffs:
 """
@@ -135,4 +138,4 @@ def main():
     client.close()
 
 if __name__ == "__main__":
-    main() 
+    main()

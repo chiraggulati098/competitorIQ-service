@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 import asyncio
 import re
-import requests
+from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from AiLib import generate_response
 from datetime import datetime
@@ -19,15 +19,16 @@ COLLECTION_NAME = "competitors"
 def get_mongo_client():
     return MongoClient(MONGO_URI)
 
-# Helper to fetch HTML using requests + BeautifulSoup
+# Helper to fetch HTML using Playwright
 async def fetch_html(url):
     try:
-        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
-        # Optionally, prettify or minify
-        html = soup.prettify()
-        return html
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            await page.goto(url, timeout=20000)
+            html = await page.content()
+            await browser.close()
+            return html
     except Exception:
         return ""
 
