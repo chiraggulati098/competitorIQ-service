@@ -20,7 +20,6 @@ def authenticate_and_get_user_details(request):
             raise HTTPException(status=401, detail="Invalid token")
         
         user_id = request_state.payload.get("sub")
-        print(f"Authenticated user ID: {user_id}")
         return {"user_id": user_id}
 
     except Exception as e:
