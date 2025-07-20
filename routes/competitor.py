@@ -1,12 +1,14 @@
 from flask import Blueprint, request, jsonify
 import asyncio
 import re
-from crawl4ai import AsyncWebCrawler
+import requests
+from bs4 import BeautifulSoup
 from AiLib import generate_response
 from datetime import datetime
 from pymongo import MongoClient
 from threading import Thread
 from bson import ObjectId
+from urllib.parse import urljoin
 
 competitor_bp = Blueprint('competitor', __name__)
 
@@ -17,21 +19,34 @@ COLLECTION_NAME = "competitors"
 def get_mongo_client():
     return MongoClient(MONGO_URI)
 
+# Helper to fetch HTML using requests + BeautifulSoup
+async def fetch_html(url):
+    try:
+        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        # Optionally, prettify or minify
+        html = soup.prettify()
+        return html
+    except Exception:
+        return ""
+
 # Async helper for crawling and field extraction (homepage only)
 async def crawl_and_extract_fields(homepage):
-    # 1. Crawl homepage
-    async with AsyncWebCrawler() as crawler:
-        homepage_result = await crawler.arun(homepage)
-    homepage_markdown = getattr(homepage_result, 'markdown', '')
-
-    # 2. Use Gemini to extract required fields from homepage content only
+    homepage_html = await fetch_html(homepage)
+    # Extract all links using <a> tags and hrefs (absolute and relative)
+    soup = BeautifulSoup(homepage_html, "html.parser")
+    hrefs = [a.get("href") for a in soup.find_all("a", href=True)]
+    # Convert relative URLs to absolute
+    links = [urljoin(homepage, href) if href and not href.startswith("http") else href for href in hrefs if href]
+    links = [link for link in links if link]
+    links = list(set(links))
+    # 2. Use Gemini to extract required fields from links only
     extraction_prompt = f"""
-Given the following website content, extract the following fields as a JSON object:\n- pricing: URL of the pricing page (if any)\n- blog: URL of the blog (if any)\n- releaseNotes: URL of release notes/changelog (if any)\n- playstore: URL of Play Store app (if any)\n- appstore: URL of App Store app (if any)\n- linkedin: URL of LinkedIn page (if any)\n- twitter: URL of Twitter/X page (if any)\n- custom: []\nReturn only a JSON object with these fields.\n\nContent:\n{homepage_markdown}\n"""
+Given the following list of links (which may be absolute or relative to the homepage), extract the following fields as a JSON object:\n- pricing: URL of the pricing page (if any)\n- blog: URL of the blog (if any)\n- releaseNotes: URL of release notes/changelog (if any)\n- playstore: URL of Play Store app (if any)\n- appstore: URL of App Store app (if any)\n- linkedin: URL of LinkedIn page (if any)\n- twitter: URL of Twitter/X page (if any)\n- custom: []\nReturn only a JSON object with these fields, and ensure all URLs are absolute (not relative).\n\nLinks:\n{links}\n"""
     fields_json = generate_response(extraction_prompt)
-    # Try to parse the JSON from Gemini's response
     import json
     try:
-        # Find the first { ... } block in the response
         match = re.search(r'\{[\s\S]*\}', fields_json)
         if match:
             fields = json.loads(match.group(0))
@@ -39,7 +54,6 @@ Given the following website content, extract the following fields as a JSON obje
             fields = {}
     except Exception:
         fields = {}
-    # Ensure custom is always an empty array
     fields['custom'] = []
     return fields
 
@@ -64,14 +78,9 @@ async def crawl_urls_and_save_snapshot(competitor_id):
         return
     urls = get_tracked_urls(competitor)
     pages = []
-    async with AsyncWebCrawler() as crawler:
-        for url in urls:
-            try:
-                result = await crawler.arun(url)
-                content = getattr(result, 'markdown', '')
-                pages.append({'url': url, 'content': content})
-            except Exception:
-                pages.append({'url': url, 'content': ''})
+    for url in urls:
+        html = await fetch_html(url)
+        pages.append({'url': url, 'content': html})
     snapshot = {
         'date': datetime.utcnow().isoformat() + 'Z',
         'pages': pages
@@ -102,7 +111,6 @@ def save_competitor():
     name = data.get('name')
     homepage = data.get('homepage')
     fields = data.get('fields')
-    # snapshot = data.get('snapshot')  # No longer used for initial save
     if not user_id or not name or not homepage or not fields:
         return jsonify({'error': 'Missing required fields'}), 400
     doc = {
