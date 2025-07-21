@@ -13,11 +13,14 @@ def generate_response(prompt):
     '''
     Send user query to Gemini API and return response
     '''
+    print(prompt[-100:])    
+    print(len(prompt))
     max_retries = 3
     for attempt in range(max_retries):
         try:
             model = genai.GenerativeModel(GEMINI_MODEL)
             response = model.generate_content(prompt)
+            print(response.usage_metadata)
             return response.text
         except Exception as e:
             if attempt < max_retries - 1:
