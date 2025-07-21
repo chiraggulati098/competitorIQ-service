@@ -12,10 +12,13 @@ import re
 from html_processing_library import diff_html  
 from mail_service import send_email
 from utils.clerk_auth import get_user_mails
+import os
+import dotenv
 
+dotenv.load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
-MONGO_URI = "mongodb://localhost:27017/"
+MONGO_URI = os.getenv("MONGO_URI")
 DB_NAME = "competitorIQ"
 COLLECTION_NAME = "competitors"
 USER_PREFS_COLLECTION = "user_preferences"

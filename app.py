@@ -3,8 +3,12 @@ from flask_cors import CORS
 from utils.clerk_auth import authenticate_and_get_user_details
 from routes.competitor import competitor_bp
 from pymongo import MongoClient
+import os
+import dotenv
 
-MONGO_URI = "mongodb://localhost:27017/"
+dotenv.load_dotenv()
+
+MONGO_URI = os.getenv("MONGO_URI")
 DB_NAME = "competitorIQ"
 USER_PREFS_COLLECTION = "user_preferences"
 

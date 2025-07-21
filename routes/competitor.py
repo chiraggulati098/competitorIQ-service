@@ -9,11 +9,14 @@ from pymongo import MongoClient
 from threading import Thread
 from bson import ObjectId
 from urllib.parse import urljoin
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 competitor_bp = Blueprint('competitor', __name__)
 
 # MongoDB connection helper
-MONGO_URI = "mongodb://localhost:27017/"
+MONGO_URI = os.getenv("MONGO_URI")
 DB_NAME = "competitorIQ"
 COLLECTION_NAME = "competitors"
 def get_mongo_client():
