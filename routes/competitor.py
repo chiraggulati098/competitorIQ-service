@@ -223,3 +223,17 @@ def update_competitor(competitor_id):
         return jsonify({'success': True}), 200
     except Exception as e:
         return jsonify({'error': f'Error updating competitor: {str(e)}'}), 500 
+
+@competitor_bp.route('/api/competitors/<competitor_id>', methods=['DELETE'])
+def delete_competitor(competitor_id):
+    try:
+        client = get_mongo_client()
+        db = client[DB_NAME]
+        collection = db[COLLECTION_NAME]
+        result = collection.delete_one({'_id': ObjectId(competitor_id)})
+        client.close()
+        if result.deleted_count == 0:
+            return jsonify({'error': 'Competitor not found'}), 404
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        return jsonify({'error': f'Error deleting competitor: {str(e)}'}), 500 
