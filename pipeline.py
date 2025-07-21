@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, date
 from pymongo import MongoClient
 from bson import ObjectId
 from playwright.async_api import async_playwright
@@ -18,6 +18,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(mess
 MONGO_URI = "mongodb://localhost:27017/"
 DB_NAME = "competitorIQ"
 COLLECTION_NAME = "competitors"
+USER_PREFS_COLLECTION = "user_preferences"
 
 def get_tracked_urls(competitor):
     urls = [competitor.get('homepage')]
@@ -124,6 +125,7 @@ def main():
     client = MongoClient(MONGO_URI)
     db = client[DB_NAME]
     collection = db[COLLECTION_NAME]
+    user_prefs_collection = db[USER_PREFS_COLLECTION]
     competitors = list(collection.find({}))
     logging.info(f"Found {len(competitors)} competitors.")
     # Group competitors by user
@@ -135,7 +137,26 @@ def main():
         user_map.setdefault(user_id, []).append(competitor)
     # Get all user emails once
     user_mails = get_user_mails()
+    today = date.today()
+    weekday = today.weekday()  
+    day_of_month = today.day
     for user_id, user_competitors in user_map.items():
+        # Fetch user preferences
+        prefs_doc = user_prefs_collection.find_one({'userId': user_id})
+        prefs = prefs_doc.get('preferences', {}) if prefs_doc else {}
+        update_freq = prefs.get('updateFreq', 'daily')
+        receive_email = prefs.get('receiveEmail', True)
+        # Determine if we should run for this user
+        should_run = False
+        if update_freq == 'daily':
+            should_run = True
+        elif update_freq == 'weekly' and weekday == 0:
+            should_run = True
+        elif update_freq == 'monthly' and day_of_month == 1:
+            should_run = True
+        if not should_run:
+            logging.info(f"Skipping user {user_id} due to updateFreq ({update_freq})")
+            continue
         summary_blocks = []
         total_pages = 0
         competitor_names = [c.get('name') for c in user_competitors]
@@ -184,9 +205,11 @@ def main():
         mail_json = generate_user_email_content(user_id, summary_blocks, total_pages, competitor_names)
         # Get user email from user_mails dict
         user_email = user_mails.get(user_id)
-        if user_email:
+        if receive_email and user_email:
             result = send_email(user_email, mail_json['subject'], mail_json['body'])
             logging.info(f"Sent email to {user_email}: {result}")
+        elif not receive_email:
+            logging.info(f"User {user_id} has opted out of email updates.")
         else:
             logging.warning(f"Could not find email for user {user_id}")
     client.close()
