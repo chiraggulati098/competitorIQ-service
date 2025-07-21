@@ -40,9 +40,6 @@ async def crawl_and_extract_fields(homepage):
     homepage_html = await fetch_html(homepage)
     # Extract all links using <a> tags and hrefs (absolute and relative)
     soup = BeautifulSoup(homepage_html, "html.parser")
-    # save homepage_html to a file
-    with open(f'{homepage.replace("/", "_")}_html.html', 'w') as f:
-        f.write(homepage_html)
     hrefs = [a.get("href") for a in soup.find_all("a", href=True)]
     # Convert relative URLs to absolute
     links = [urljoin(homepage, href) if href and not href.startswith("http") else href for href in hrefs if href]
