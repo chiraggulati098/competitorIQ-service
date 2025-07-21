@@ -22,7 +22,7 @@ CORS(app, origins=["https://competitor-iq-insights-ai.vercel.app"], supports_cre
 # Register competitor routes
 app.register_blueprint(competitor_bp)
 
-@app.route('/login', methods=['POST'])
+@app.route('/login', methods=['POST', 'OPTIONS'])
 def login():
     # if request.method == 'OPTIONS':
     #     response = jsonify({})
