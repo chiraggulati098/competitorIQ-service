@@ -150,3 +150,30 @@ def trigger_snapshot(competitor_id):
         asyncio.run(crawl_urls_and_save_snapshot(competitor_id))
     Thread(target=run_bg, daemon=True).start()
     return '', 202 
+
+@competitor_bp.route('/api/competitors/summaries', methods=['GET'])
+def get_competitor_summaries():
+    user_id = request.args.get('userId')
+    if not user_id:
+        return jsonify({'error': 'Missing userId parameter'}), 400
+    try:
+        client = get_mongo_client()
+        db = client[DB_NAME]
+        collection = db[COLLECTION_NAME]
+        competitors = list(collection.find({'userId': user_id}))
+        all_summaries = []
+        for competitor in competitors:
+            name = competitor.get('name')
+            summaries = competitor.get('summaries', [])
+            for summary in summaries:
+                all_summaries.append({
+                    'company': name,
+                    'date': summary.get('date'),
+                    'summary': summary.get('summary')
+                })
+        # Sort all summaries by date descending
+        all_summaries.sort(key=lambda x: x['date'] if x['date'] else '', reverse=True)
+        client.close()
+        return jsonify({'summaries': all_summaries}), 200
+    except Exception as e:
+        return jsonify({'error': f'Error fetching summaries: {str(e)}'}), 500 
