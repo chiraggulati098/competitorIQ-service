@@ -67,16 +67,14 @@ async def crawl_urls(urls):
 def summarize_with_gemini(diff_by_url):
     prompt = """
 You are an expert AI product analyst for CompetitorIQ, a tool that tracks changes in competitors' products.
-Analyze the content from {url} to identify *meaningful* changes related to:
+You will be given the HTML diffs for all tracked pages of a single competitor.
+Summarize the most important, meaningful changes as a prioritized list of bullet points (one change per bullet), focusing on:
 - New features or product updates
 - Pricing changes
 - New blog posts
 - Social announcements
-Ignore trivial or cosmetic changes (e.g., minor text tweaks, formatting, or style changes).
-Return a JSON object where each key is the relevant field (e.g., 'pricing', 'blog', 'releaseNotes', 'playstore', 'appstore', 'linkedin', 'twitter', or the URL for custom fields),
-and each value is a clear, confident, actionable summary of the meaningful change in 1-2 sentences.
-If no meaningful changes are detected, return an empty JSON object: {{}}.
-Do not include any explanations or headers in the JSON output.
+Prioritize the most impactful changes at the top. Ignore trivial or cosmetic changes (e.g., minor text tweaks, formatting, or style changes).
+Return a JSON array of strings, each string being a meaningful change. If no meaningful changes are detected, return ["No changes detected"].
 
 Diffs:
 """
@@ -85,47 +83,23 @@ Diffs:
     prompt += "\nJSON:"
     response = generate_response(prompt)
     try:
-        match = re.search(r'\{[\s\S]*\}', response)
+        match = re.search(r'\[[\s\S]*\]', response)
         if match:
-            summary_json = json.loads(match.group(0))
+            summary_list = json.loads(match.group(0))
         else:
-            summary_json = {}
+            summary_list = ["No changes detected"]
     except Exception:
-        summary_json = {}
-    return summary_json
+        summary_list = ["No changes detected"]
+    return summary_list
 
-def generate_user_email_content(user_id, user_competitors):
-    summary_blocks = []
-    total_pages = 0
-    competitor_names = []
-    for competitor in user_competitors:
-        name = competitor.get('name')
-        competitor_names.append(name)
-        snaps = competitor.get('snapshots', [])
-        if len(snaps) < 2:
-            continue
-        snap1, snap2 = snaps[-2], snaps[-1]
-        diff_by_url = diff_snapshots(snap1, snap2)
-        summary_json = summarize_with_gemini(diff_by_url)
-        summary_doc = {
-            'date': snap2['date'],
-            'summary': summary_json,
-            'diff': diff_by_url
-        }
-        # Store summary, keep only 10 most recent
-        competitor['summaries'] = competitor.get('summaries', [])[-9:] + [summary_doc]
-        summary_blocks.append({
-            'competitor': name,
-            'summary': summary_json,
-            'diff': diff_by_url
-        })
-        total_pages += len(snap2.get('pages', []))
+
+def generate_user_email_content(user_id, summary_blocks, total_pages, competitor_names):
     # Compose prompt for Gemini to generate subject and body
     prompt = f"""
 You are an expert product analyst and email copywriter for CompetitorIQ. Write a concise, actionable email update for the user summarizing all tracked competitors' changes.
 
 Details to include:
-- Number of competitors tracked: {len(user_competitors)}
+- Number of competitors tracked: {len(competitor_names)}
 - Names of competitors: {', '.join(competitor_names)}
 - Total number of pages tracked: {total_pages}
 - For each competitor, summarize the meaningful changes (see below)
@@ -162,26 +136,52 @@ def main():
     # Get all user emails once
     user_mails = get_user_mails()
     for user_id, user_competitors in user_map.items():
+        summary_blocks = []
+        total_pages = 0
+        competitor_names = [c.get('name') for c in user_competitors]
+
         # For each competitor, update snapshots and summaries
         for competitor in user_competitors:
             urls = get_tracked_urls(competitor)
             # Take new snapshot
             pages = asyncio.run(crawl_urls(urls))
             snapshot = {
-                'date': datetime.utcnow().isoformat() + 'Z',
+                'date': datetime.utcnow(),
                 'pages': pages
             }
+            total_pages += len(pages)
             # Add snapshot, keep only 2 most recent
             collection.update_one(
                 {'_id': competitor['_id']},
                 {'$push': {'snapshots': {'$each': [snapshot], '$slice': -2}}}
             )
             # Refresh competitor with latest snapshots
-            updated = collection.find_one({'_id': competitor['_id']})
-            competitor['snapshots'] = updated.get('snapshots', [])
-            competitor['summaries'] = updated.get('summaries', [])
+            updated_competitor = collection.find_one({'_id': competitor['_id']})
+            
+            # Generate and store summary
+            snaps = updated_competitor.get('snapshots', [])
+            summary_list = ["No changes detected"]
+            summary_date = datetime.utcnow()
+
+            if len(snaps) >= 2:
+                snap1, snap2 = snaps[-2], snaps[-1]
+                diff_by_url = diff_snapshots(snap1, snap2)
+                summary_list = summarize_with_gemini(diff_by_url)
+                summary_date = snap2['date']
+            
+            summary_doc = {'date': summary_date, 'summary': summary_list}
+            collection.update_one(
+                {'_id': competitor['_id']},
+                {'$push': {'summaries': {'$each': [summary_doc], '$slice': -10}}}
+            )
+
+            summary_blocks.append({
+                'competitor': competitor.get('name'),
+                'summary': summary_list
+            })
+
         # Generate email content for this user
-        mail_json = generate_user_email_content(user_id, user_competitors)
+        mail_json = generate_user_email_content(user_id, summary_blocks, total_pages, competitor_names)
         # Get user email from user_mails dict
         user_email = user_mails.get(user_id)
         if user_email:
