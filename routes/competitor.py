@@ -177,3 +177,27 @@ def get_competitor_summaries():
         return jsonify({'summaries': all_summaries}), 200
     except Exception as e:
         return jsonify({'error': f'Error fetching summaries: {str(e)}'}), 500 
+
+@competitor_bp.route('/api/competitors/list', methods=['GET'])
+def list_competitors():
+    user_id = request.args.get('userId')
+    if not user_id:
+        return jsonify({'error': 'Missing userId parameter'}), 400
+    try:
+        client = get_mongo_client()
+        db = client[DB_NAME]
+        collection = db[COLLECTION_NAME]
+        competitors = list(collection.find({'userId': user_id}))
+        # Only return relevant fields
+        result = []
+        for c in competitors:
+            result.append({
+                'id': str(c.get('_id')),
+                'name': c.get('name'),
+                'homepage': c.get('homepage'),
+                'fields': c.get('fields', {}),
+            })
+        client.close()
+        return jsonify({'competitors': result}), 200
+    except Exception as e:
+        return jsonify({'error': f'Error fetching competitors: {str(e)}'}), 500 
