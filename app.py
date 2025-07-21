@@ -24,10 +24,10 @@ app.register_blueprint(competitor_bp)
 
 @app.route('/login', methods=['POST', 'OPTIONS'])
 def login():
-    if request.method == 'OPTIONS':
-        response = jsonify({})
-        response.status_code = 204
-        return response
+    # if request.method == 'OPTIONS':
+    #     response = jsonify({})
+    #     response.status_code = 204
+    #     return response
     try:
         user_details = authenticate_and_get_user_details(request)
         return jsonify({"success": True, "user": user_details}), 200
