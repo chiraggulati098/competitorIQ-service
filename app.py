@@ -17,12 +17,12 @@ def get_mongo_client():
 
 app = Flask(__name__)
 #CORS(app, origins=["http://localhost:8080"], supports_credentials=True)
-CORS(app, origins=["https://competitor-iq-insights-ai.vercel.app/"], supports_credentials=True, allow_headers=["Content-Type", "Authorization"], allowed_methods=["GET", "POST", "OPTIONS"])
+CORS(app, origins=["https://competitor-iq-insights-ai.vercel.app"], supports_credentials=True, allow_headers=["Content-Type", "Authorization"], allowed_methods=["GET", "POST", "OPTIONS"])
 
 # Register competitor routes
 app.register_blueprint(competitor_bp)
 
-@app.route('/login', methods=['POST', 'OPTIONS'])
+@app.route('/login', methods=['POST'])
 def login():
     # if request.method == 'OPTIONS':
     #     response = jsonify({})
