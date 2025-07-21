@@ -33,6 +33,10 @@ def login():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 401
 
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({'status': 'ok'}), 200
+
 @app.route('/api/user/preferences', methods=['GET', 'POST'])
 def user_preferences():
     client = get_mongo_client()
