@@ -13,8 +13,8 @@ def generate_response(prompt):
     '''
     Send user query to Gemini API and return response
     '''
-    print(prompt[-100:])    
-    print(len(prompt))
+    # print(prompt[-100:])    
+    # print(len(prompt))
     max_retries = 3
     for attempt in range(max_retries):
         try:

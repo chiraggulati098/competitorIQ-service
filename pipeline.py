@@ -44,7 +44,7 @@ def diff_snapshots(snap1, snap2):
         content2 = pages2.get(url, '')
         diff = diff_html(content1, content2)  
         diff_by_url[url] = '\n'.join(diff)
-    print(diff_by_url)
+    # print(diff_by_url)
     return diff_by_url
 
 # Fetch HTML using Playwright
