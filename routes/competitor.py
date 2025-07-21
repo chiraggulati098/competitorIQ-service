@@ -201,3 +201,25 @@ def list_competitors():
         return jsonify({'competitors': result}), 200
     except Exception as e:
         return jsonify({'error': f'Error fetching competitors: {str(e)}'}), 500 
+
+@competitor_bp.route('/api/competitors/<competitor_id>', methods=['PATCH'])
+def update_competitor(competitor_id):
+    data = request.get_json()
+    name = data.get('name')
+    fields = data.get('fields')
+    if not name or fields is None:
+        return jsonify({'error': 'Missing name or fields'}), 400
+    try:
+        client = get_mongo_client()
+        db = client[DB_NAME]
+        collection = db[COLLECTION_NAME]
+        result = collection.update_one(
+            {'_id': ObjectId(competitor_id)},
+            {'$set': {'name': name, 'fields': fields}}
+        )
+        client.close()
+        if result.matched_count == 0:
+            return jsonify({'error': 'Competitor not found'}), 404
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        return jsonify({'error': f'Error updating competitor: {str(e)}'}), 500 
